@@ -54,6 +54,19 @@ func TestProxy_Passthrough(t *testing.T) {
 	}
 	defer sess.Close()
 
+	// Capabilities mirror the upstream: it has a tool but no prompts or
+	// resources, so the proxy must advertise tools only.
+	caps := sess.InitializeResult().Capabilities
+	if caps.Tools == nil {
+		t.Error("proxy did not advertise tools capability")
+	}
+	if caps.Prompts != nil {
+		t.Error("proxy advertised prompts capability the upstream lacks")
+	}
+	if caps.Resources != nil {
+		t.Error("proxy advertised resources capability the upstream lacks")
+	}
+
 	// Tool names pass through unprefixed.
 	tools, err := sess.ListTools(t.Context(), &mcp.ListToolsParams{})
 	if err != nil {
