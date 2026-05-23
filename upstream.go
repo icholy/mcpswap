@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -76,11 +77,19 @@ func (u *Upstream) closeInBackground(s *mcp.ClientSession) {
 	}
 	go func() {
 		id := s.ID()
-		if err := s.Close(); err != nil {
-			u.logger.Warn("closing previous upstream session", "id", id, "err", err)
-			return
+		done := make(chan error, 1)
+		go func() { done <- s.Close() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				u.logger.Warn("closing previous upstream session", "id", id, "err", err)
+				return
+			}
+			u.logger.Info("upstream session closed", "id", id)
+		case <-time.After(10 * time.Second):
+			// The close is not aborted; we just stop waiting on it.
+			u.logger.Warn("previous upstream session close did not return within 10s", "id", id)
 		}
-		u.logger.Info("upstream session closed", "id", id)
 	}()
 }
 
