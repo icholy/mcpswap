@@ -35,11 +35,14 @@ func startProxy(t *testing.T, upstreamURL string) string {
 	if err := up.Swap(t.Context(), TransportConfig{Transport: "streamable", URL: upstreamURL}); err != nil {
 		t.Fatalf("swap: %v", err)
 	}
-	pr, err := NewProxy(up, "streamable")
-	if err != nil {
-		t.Fatalf("new proxy: %v", err)
-	}
-	ts := httptest.NewServer(pr)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "mcproxy", Version: "0"}, &mcp.ServerOptions{
+		HasTools:     true,
+		HasPrompts:   true,
+		HasResources: true,
+	})
+	srv.AddReceivingMiddleware(Middleware(up))
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 	return ts.URL
 }

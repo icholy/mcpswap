@@ -22,12 +22,20 @@ if err := up.Swap(ctx, mcproxy.TransportConfig{
     return err
 }
 
-pr, err := mcproxy.NewProxy(up, "streamable")
-if err != nil {
-    return err
-}
-http.ListenAndServe(":8080", pr)
+srv := mcp.NewServer(&mcp.Implementation{Name: "mcproxy", Version: "0.1.0"}, &mcp.ServerOptions{
+    HasTools:     true,
+    HasPrompts:   true,
+    HasResources: true,
+})
+srv.AddReceivingMiddleware(mcproxy.Middleware(up))
+http.ListenAndServe(":8080", mcp.NewStreamableHTTPHandler(
+    func(*http.Request) *mcp.Server { return srv }, nil,
+))
 ```
+
+`mcproxy.Middleware` is an `mcp` receiving middleware that forwards
+list/call/get/read requests to the active upstream session; add it to
+your own `mcp.Server`.
 
 `Upstream.Swap` connects a new session and atomically replaces the
 active one, closing the previous session in the background. On failure

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/icholy/mcproxy"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // fileConfig is the on-disk config: one proxy block and one upstream.
@@ -55,13 +56,30 @@ func run(configPath string) error {
 	}
 	cancel()
 
-	pr, err := mcproxy.NewProxy(up, cfg.Proxy.Transport)
-	if err != nil {
-		return fmt.Errorf("create proxy: %w", err)
+	mcpSrv := mcp.NewServer(&mcp.Implementation{
+		Name:    "mcproxy",
+		Version: "0.1.0",
+	}, &mcp.ServerOptions{
+		// We have no statically-registered tools/prompts/resources;
+		// HasXXX makes the SDK advertise the capability anyway.
+		HasTools:     true,
+		HasPrompts:   true,
+		HasResources: true,
+	})
+	mcpSrv.AddReceivingMiddleware(mcproxy.Middleware(up))
+
+	var handler http.Handler
+	switch cfg.Proxy.Transport {
+	case "", "streamable":
+		handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil)
+	case "sse":
+		handler = mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil)
+	default:
+		return fmt.Errorf("unknown proxy transport %q", cfg.Proxy.Transport)
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(cfg.Proxy.Path, pr)
+	mux.Handle(cfg.Proxy.Path, handler)
 	srv := &http.Server{
 		Addr:              cfg.Proxy.Addr,
 		Handler:           mux,
