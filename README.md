@@ -1,4 +1,4 @@
-# mcproxy
+# mcpswap
 
 A single-upstream MCP adapter. It fronts one upstream MCP server
 (stdio, SSE, or streamable-HTTP) and exposes it over an HTTP endpoint,
@@ -7,14 +7,11 @@ upstream session can be hot-swapped at runtime, which lets an embedder
 rotate credentials (e.g. refresh an OAuth token) without dropping
 in-flight requests.
 
-`mcproxy` is primarily a library; the bundled `cmd/mcproxy` is a thin
-static binary that connects once and serves.
-
-## Library
+## Usage
 
 ```go
-up := mcproxy.NewUpstream(slog.Default())
-transport, err := mcproxy.BuildTransport(mcproxy.TransportConfig{
+up := mcpswap.NewUpstream(slog.Default())
+transport, err := mcpswap.BuildTransport(mcpswap.TransportConfig{
     Transport: "streamable",
     URL:       "https://api.example.com/mcp/",
     Headers:   http.Header{"Authorization": {"Bearer " + token}},
@@ -26,7 +23,7 @@ if err := up.Swap(ctx, transport); err != nil {
     return err
 }
 
-srv := mcp.NewServer(&mcp.Implementation{Name: "mcproxy", Version: "0.1.0"}, &mcp.ServerOptions{
+srv := mcp.NewServer(&mcp.Implementation{Name: "mcpswap", Version: "0.1.0"}, &mcp.ServerOptions{
     HasTools:     true,
     HasPrompts:   true,
     HasResources: true,
@@ -46,61 +43,13 @@ active one, closing the previous session in the background. On failure
 the active session is left untouched, so callers may retry or keep
 serving on the old session. To rotate credentials, build a fresh
 transport and call `Swap` again — the mechanism is identical across
-transports. `mcproxy` ships no rotation policy: when and how you
+transports. `mcpswap` ships no rotation policy: when and how you
 re-`Swap` is up to you.
 
-## Command
+## Transports
 
-```
-mcproxy -config mcproxy.json
-```
+`BuildTransport` builds the upstream transport from a `TransportConfig`:
 
-The command connects once at startup and serves. It does not rotate
-credentials.
-
-### Config
-
-```json
-{
-  "proxy":    { "addr": ":8080", "path": "/", "transport": "streamable" },
-  "upstream": { "transport": "streamable", "url": "https://api.example.com/mcp/", "headers": { "Authorization": "Bearer ..." } }
-}
-```
-
-- `proxy.addr`: listen address.
-- `proxy.path`: mount path for the MCP HTTP handler. Defaults to `/`.
-- `proxy.transport`: client-facing transport, `streamable` (default) or `sse`.
-- `upstream`: the single upstream MCP (see below).
-
-### Upstream transports
-
-**stdio**
-
-```json
-"upstream": {
-  "transport": "stdio",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-  "env": { "LOG_LEVEL": "info" }
-}
-```
-
-**streamable-HTTP**
-
-```json
-"upstream": {
-  "transport": "streamable",
-  "url": "https://api.githubcopilot.com/mcp/",
-  "headers": { "Authorization": "Bearer ..." }
-}
-```
-
-**SSE**
-
-```json
-"upstream": {
-  "transport": "sse",
-  "url": "https://mcp.example.com/sse",
-  "headers": { "X-API-Key": "..." }
-}
-```
+- **stdio** — `Command`, `Args`, `Env`.
+- **streamable-HTTP** (`"streamable"`) — `URL`, `Headers`.
+- **SSE** (`"sse"`) — `URL`, `Headers`.
