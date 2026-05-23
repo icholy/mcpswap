@@ -32,11 +32,7 @@ func startProxy(t *testing.T, upstreamURL string) string {
 	t.Helper()
 	up := NewUpstream(nil)
 	t.Cleanup(up.Close)
-	transport, err := BuildTransport(TransportConfig{Transport: "streamable", URL: upstreamURL})
-	if err != nil {
-		t.Fatalf("build transport: %v", err)
-	}
-	if err := up.Swap(t.Context(), transport); err != nil {
+	if err := up.Swap(t.Context(), &mcp.StreamableClientTransport{Endpoint: upstreamURL}); err != nil {
 		t.Fatalf("swap: %v", err)
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "mcproxy", Version: "0"}, &mcp.ServerOptions{

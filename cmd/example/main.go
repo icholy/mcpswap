@@ -16,30 +16,22 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// fileConfig is the on-disk config: one proxy block and one upstream.
+// fileConfig is the example's on-disk config: where to listen, the
+// client-facing transport, and the streamable-HTTP upstream to proxy.
 type fileConfig struct {
-	Proxy struct {
-		Addr      string `json:"addr"`
-		Path      string `json:"path"`
-		Transport string `json:"transport"`
-	} `json:"proxy"`
-	Upstream struct {
-		Transport string            `json:"transport"`
-		Command   string            `json:"command,omitempty"`
-		Args      []string          `json:"args,omitempty"`
-		Env       map[string]string `json:"env,omitempty"`
-		URL       string            `json:"url,omitempty"`
-		Headers   map[string]string `json:"headers,omitempty"`
-	} `json:"upstream"`
+	Addr      string            `json:"addr"`
+	Transport string            `json:"transport"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers"`
 }
 
 func main() {
-	configPath := flag.String("config", "mcproxy.json", "path to the proxy config file")
+	configPath := flag.String("config", "mcpswap.json", "path to the config file")
 	swapInterval := flag.Duration("swap-interval", 30*time.Second, "interval between upstream session swaps")
 	flag.Parse()
 
 	if err := run(*configPath, *swapInterval); err != nil {
-		slog.Error("mcproxy exited with error", "err", err)
+		slog.Error("exited with error", "err", err)
 		os.Exit(1)
 	}
 }
@@ -59,40 +51,28 @@ func run(configPath string, swapInterval time.Duration) error {
 	}
 	go swapLoop(ctx, up, cfg, swapInterval)
 
-	mcpSrv := mcp.NewServer(&mcp.Implementation{
-		Name:    "mcproxy",
-		Version: "0.1.0",
-	}, &mcp.ServerOptions{
-		// We have no statically-registered tools/prompts/resources;
-		// HasXXX makes the SDK advertise the capability anyway.
+	srv := mcp.NewServer(&mcp.Implementation{Name: "mcpswap", Version: "0.1.0"}, &mcp.ServerOptions{
 		HasTools:     true,
 		HasPrompts:   true,
 		HasResources: true,
 	})
-	mcpSrv.AddReceivingMiddleware(up.Dispatch)
+	srv.AddReceivingMiddleware(up.Dispatch)
 
 	var handler http.Handler
-	switch cfg.Proxy.Transport {
+	switch cfg.Transport {
 	case "", "streamable":
-		handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil)
+		handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
 	case "sse":
-		handler = mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil)
+		handler = mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return srv }, nil)
 	default:
-		return fmt.Errorf("unknown proxy transport %q", cfg.Proxy.Transport)
+		return fmt.Errorf("unknown transport %q", cfg.Transport)
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle(cfg.Proxy.Path, handler)
-	srv := &http.Server{
-		Addr:              cfg.Proxy.Addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
+	httpSrv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	errs := make(chan error, 1)
 	go func() {
-		slog.Info("mcproxy listening", "addr", cfg.Proxy.Addr, "path", cfg.Proxy.Path)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Info("listening", "addr", cfg.Addr)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errs <- fmt.Errorf("http: %w", err)
 			return
 		}
@@ -107,23 +87,19 @@ func run(configPath string, swapInterval time.Duration) error {
 	}
 
 	slog.Info("shutting down")
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelShutdown()
-	_ = srv.Shutdown(shutdownCtx)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpSrv.Shutdown(shutdownCtx)
 	up.Close()
 	return <-errs
 }
 
-// swap builds a fresh transport from cfg and swaps the upstream session.
-// A new transport is built each call since Swap consumes it.
+// swap connects a fresh upstream session. A new transport is built each
+// call since Swap consumes it.
 func swap(ctx context.Context, up *mcpswap.Upstream, cfg *fileConfig) error {
-	transport, err := mcpswap.BuildTransport(upstreamConfig(cfg))
-	if err != nil {
-		return fmt.Errorf("build transport: %w", err)
-	}
 	swapCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return up.Swap(swapCtx, transport)
+	return up.Swap(swapCtx, upstreamTransport(cfg))
 }
 
 // swapLoop re-swaps the upstream session every interval until ctx is done.
@@ -142,6 +118,27 @@ func swapLoop(ctx context.Context, up *mcpswap.Upstream, cfg *fileConfig, interv
 	}
 }
 
+// upstreamTransport builds a streamable-HTTP transport that adds the
+// configured headers to every request.
+func upstreamTransport(cfg *fileConfig) mcp.Transport {
+	client := http.DefaultClient
+	if len(cfg.Headers) > 0 {
+		client = &http.Client{Transport: headerTransport(cfg.Headers)}
+	}
+	return &mcp.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: client}
+}
+
+// headerTransport adds a fixed set of headers to every request.
+type headerTransport map[string]string
+
+func (h headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	for k, v := range h {
+		req.Header.Set(k, v)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
 func loadConfig(path string) (*fileConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -151,31 +148,11 @@ func loadConfig(path string) (*fileConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if cfg.Proxy.Path == "" {
-		cfg.Proxy.Path = "/"
+	if cfg.Addr == "" {
+		cfg.Addr = ":8080"
 	}
-	if cfg.Proxy.Transport == "" {
-		cfg.Proxy.Transport = "streamable"
-	}
-	if cfg.Upstream.Transport == "" {
-		return nil, fmt.Errorf("upstream.transport is required")
+	if cfg.URL == "" {
+		return nil, fmt.Errorf("url is required")
 	}
 	return &cfg, nil
-}
-
-func upstreamConfig(cfg *fileConfig) mcpswap.TransportConfig {
-	tc := mcpswap.TransportConfig{
-		Transport: cfg.Upstream.Transport,
-		Command:   cfg.Upstream.Command,
-		Args:      cfg.Upstream.Args,
-		Env:       cfg.Upstream.Env,
-		URL:       cfg.Upstream.URL,
-	}
-	if len(cfg.Upstream.Headers) > 0 {
-		tc.Headers = http.Header{}
-		for k, v := range cfg.Upstream.Headers {
-			tc.Headers.Set(k, v)
-		}
-	}
-	return tc
 }

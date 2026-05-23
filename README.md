@@ -11,14 +11,10 @@ in-flight requests.
 
 ```go
 up := mcpswap.NewUpstream(slog.Default())
-transport, err := mcpswap.BuildTransport(mcpswap.TransportConfig{
-    Transport: "streamable",
-    URL:       "https://api.example.com/mcp/",
-    Headers:   http.Header{"Authorization": {"Bearer " + token}},
-})
-if err != nil {
-    return err
-}
+
+// Swap accepts any mcp.Transport. Use the transport's HTTPClient for
+// auth headers, retries, etc.
+transport := &mcp.StreamableClientTransport{Endpoint: "https://api.example.com/mcp/"}
 if err := up.Swap(ctx, transport); err != nil {
     return err
 }
@@ -48,8 +44,7 @@ re-`Swap` is up to you.
 
 ## Transports
 
-`BuildTransport` builds the upstream transport from a `TransportConfig`:
-
-- **stdio** — `Command`, `Args`, `Env`.
-- **streamable-HTTP** (`"streamable"`) — `URL`, `Headers`.
-- **SSE** (`"sse"`) — `URL`, `Headers`.
+`Swap` accepts any `mcp.Transport`, so the upstream can be stdio
+(`mcp.CommandTransport`), streamable-HTTP (`mcp.StreamableClientTransport`),
+or SSE (`mcp.SSEClientTransport`). `mcpswap` does not construct
+transports — build whichever you need and hand it to `Swap`.

@@ -1,3 +1,9 @@
+// Package mcpswap is a single-upstream MCP adapter. It holds a live
+// session to one upstream MCP server and forwards requests to it via
+// Upstream.Dispatch, an mcp receiving middleware. The active session
+// can be hot-swapped at any time with Upstream.Swap, letting the caller
+// rotate credentials without dropping in-flight requests. Transport
+// construction and rotation policy live with the caller.
 package mcpswap
 
 import (
