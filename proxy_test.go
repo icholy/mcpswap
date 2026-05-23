@@ -60,6 +60,9 @@ func TestProxy_Passthrough(t *testing.T) {
 	if caps.Tools == nil {
 		t.Error("proxy did not advertise tools capability")
 	}
+	if caps.Tools != nil && caps.Tools.ListChanged {
+		t.Error("proxy advertised tools.listChanged it does not forward")
+	}
 	if caps.Prompts != nil {
 		t.Error("proxy advertised prompts capability the upstream lacks")
 	}

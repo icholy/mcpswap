@@ -3,6 +3,7 @@ package mcproxy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,6 +16,7 @@ type Proxy struct {
 	upstream *Upstream
 	server   *mcp.Server
 	handler  http.Handler
+	logger   *slog.Logger
 }
 
 // NewProxy builds a Proxy that serves u over the given client-facing
@@ -30,7 +32,7 @@ func NewProxy(u *Upstream, transport string) (*Proxy, error) {
 		HasPrompts:   true,
 		HasResources: true,
 	})
-	p := &Proxy{upstream: u, server: srv}
+	p := &Proxy{upstream: u, server: srv, logger: slog.Default()}
 	srv.AddReceivingMiddleware(p.dispatch)
 	switch transport {
 	case "", "streamable":
@@ -48,20 +50,37 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.handler.ServeHTTP(w, r)
 }
 
-// dispatch forwards list/call/get/read methods to the active
-// upstream session. The initialize result is rewritten to advertise the
-// upstream's real capabilities. Everything else (e.g. ping) falls
-// through to the SDK's default handler.
+// dispatch forwards list/call/get/read methods to the active upstream
+// session. The initialize result advertises the capabilities the proxy
+// can fulfill. Stateful methods are not proxied, and unrecognized
+// methods fall through to the SDK's default handler.
 func (p *Proxy) dispatch(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		switch r := req.(type) {
 		case *mcp.ServerRequest[*mcp.InitializeParams]:
-			// Use the capabilities reported by the upstream
 			res, err := next(ctx, method, req)
 			if init, ok := res.(*mcp.InitializeResult); ok {
-				if sess, err := p.upstream.Session(); err == nil {
-					if up := sess.InitializeResult(); up != nil {
-						init.Capabilities = up.Capabilities
+				if sess, serr := p.upstream.Session(); serr == nil {
+					if up := sess.InitializeResult(); up != nil && up.Capabilities != nil {
+						// Advertise only what we actually proxy: drop subscribe,
+						// listChanged, and logging — we forward no notifications
+						// and keep no per-session state across hot-swaps.
+						c := up.Capabilities
+						caps := &mcp.ServerCapabilities{
+							Completions:  c.Completions,
+							Experimental: c.Experimental,
+							Extensions:   c.Extensions,
+						}
+						if c.Tools != nil {
+							caps.Tools = &mcp.ToolCapabilities{}
+						}
+						if c.Prompts != nil {
+							caps.Prompts = &mcp.PromptCapabilities{}
+						}
+						if c.Resources != nil {
+							caps.Resources = &mcp.ResourceCapabilities{}
+						}
+						init.Capabilities = caps
 						init.Instructions = up.Instructions
 					}
 				}
@@ -119,7 +138,18 @@ func (p *Proxy) dispatch(next mcp.MethodHandler) mcp.MethodHandler {
 				return nil, err
 			}
 			return sess.Complete(ctx, r.Params)
+		case *mcp.SubscribeRequest, *mcp.UnsubscribeRequest, *mcp.ServerRequest[*mcp.SetLoggingLevelParams]:
+			// Stateful methods we deliberately don't proxy: resource
+			// subscriptions and the logging level are per-session and would be
+			// lost on a hot-swap, and we forward no notifications. We mask
+			// these capabilities at initialize, so a conformant client won't
+			// reach here; let the SDK reject/no-op them locally.
+			return next(ctx, method, req)
+		default:
+			// initialized/ping/cancelled/progress and anything else are served
+			// by the SDK; surface them for debugging.
+			p.logger.Debug("unhandled method", "method", method)
+			return next(ctx, method, req)
 		}
-		return next(ctx, method, req)
 	}
 }
