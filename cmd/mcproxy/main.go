@@ -71,7 +71,7 @@ func run(configPath string) error {
 		HasPrompts:   true,
 		HasResources: true,
 	})
-	mcpSrv.AddReceivingMiddleware(mcproxy.Middleware(up))
+	mcpSrv.AddReceivingMiddleware(up.Dispatch)
 
 	var handler http.Handler
 	switch cfg.Proxy.Transport {

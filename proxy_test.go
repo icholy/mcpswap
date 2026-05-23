@@ -44,7 +44,7 @@ func startProxy(t *testing.T, upstreamURL string) string {
 		HasPrompts:   true,
 		HasResources: true,
 	})
-	srv.AddReceivingMiddleware(Middleware(up))
+	srv.AddReceivingMiddleware(up.Dispatch)
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)

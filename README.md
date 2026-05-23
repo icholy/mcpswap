@@ -31,13 +31,13 @@ srv := mcp.NewServer(&mcp.Implementation{Name: "mcproxy", Version: "0.1.0"}, &mc
     HasPrompts:   true,
     HasResources: true,
 })
-srv.AddReceivingMiddleware(mcproxy.Middleware(up))
+srv.AddReceivingMiddleware(up.Dispatch)
 http.ListenAndServe(":8080", mcp.NewStreamableHTTPHandler(
     func(*http.Request) *mcp.Server { return srv }, nil,
 ))
 ```
 
-`mcproxy.Middleware` is an `mcp` receiving middleware that forwards
+`Upstream.Dispatch` is an `mcp` receiving middleware that forwards
 list/call/get/read requests to the active upstream session; add it to
 your own `mcp.Server`.
 
