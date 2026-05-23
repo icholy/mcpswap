@@ -4,16 +4,11 @@
     "path": "/",
     "transport": "streamable"
   },
-  "providers": [
-    {"type": "env"}
-  ],
-  "servers": {
-    "github": {
-      "transport": "streamable",
-      "url": "https://api.githubcopilot.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer ${env:TEST_GITHUB_TOKEN}"
-      }
+  "upstream": {
+    "transport": "streamable",
+    "url": "https://api.githubcopilot.com/mcp/",
+    "headers": {
+      "Authorization": "Bearer replace-me"
     }
   }
 }

@@ -1,6 +1,9 @@
-// Package mcpx holds helpers used by mcproxy that augment the official
-// MCP Go SDK: transport construction, name/URI prefix surgery, etc.
-package mcpx
+// Package mcproxy is a single-upstream MCP adapter. It fronts one
+// upstream MCP server (stdio, SSE, or streamable-HTTP) and exposes it
+// over an HTTP endpoint, atomically hot-swapping the upstream session
+// on demand via Upstream.Swap. Credential/rotation policy lives with
+// the caller: build a fresh TransportConfig and call Swap.
+package mcproxy
 
 import (
 	"fmt"
@@ -11,9 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TransportConfig is the resolved (template-free) config consumed by
-// BuildTransport. It mirrors the fields of config.ResolvedClientConfig
-// without taking a dependency on that package.
+// TransportConfig is a resolved, template-free upstream config.
 type TransportConfig struct {
 	// Transport selects the upstream transport: "stdio", "http"
 	// (alias: "streamable"), or "sse".
@@ -29,30 +30,30 @@ type TransportConfig struct {
 	Headers http.Header
 }
 
-// BuildTransport returns the right mcp.Transport for r.
-func BuildTransport(r TransportConfig) (mcp.Transport, error) {
-	switch r.Transport {
+// BuildTransport returns the right mcp.Transport for c.
+func BuildTransport(c TransportConfig) (mcp.Transport, error) {
+	switch c.Transport {
 	case "stdio":
-		cmd := exec.Command(r.Command, r.Args...)
-		if len(r.Env) > 0 {
+		cmd := exec.Command(c.Command, c.Args...)
+		if len(c.Env) > 0 {
 			cmd.Env = append(cmd.Env, os.Environ()...)
-			for k, v := range r.Env {
+			for k, v := range c.Env {
 				cmd.Env = append(cmd.Env, k+"="+v)
 			}
 		}
 		return &mcp.CommandTransport{Command: cmd}, nil
 	case "http", "streamable":
 		return &mcp.StreamableClientTransport{
-			Endpoint:   r.URL,
-			HTTPClient: clientWithHeaders(r.Headers),
+			Endpoint:   c.URL,
+			HTTPClient: clientWithHeaders(c.Headers),
 		}, nil
 	case "sse":
 		return &mcp.SSEClientTransport{
-			Endpoint:   r.URL,
-			HTTPClient: clientWithHeaders(r.Headers),
+			Endpoint:   c.URL,
+			HTTPClient: clientWithHeaders(c.Headers),
 		}, nil
 	default:
-		return nil, fmt.Errorf("unknown transport %q", r.Transport)
+		return nil, fmt.Errorf("unknown transport %q", c.Transport)
 	}
 }
 
