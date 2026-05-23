@@ -142,6 +142,7 @@ func (u *Upstream) Dispatch(next mcp.MethodHandler) mcp.MethodHandler {
 						}
 						init.Capabilities = caps
 						init.Instructions = up.Instructions
+						init.ServerInfo = up.ServerInfo
 					}
 				}
 			}
