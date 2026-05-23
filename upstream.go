@@ -22,19 +22,27 @@ import (
 // active one; readers see either the old or the new session, never a
 // torn state. Upstream knows nothing about credentials or rotation —
 // the caller decides when to Swap and with what config.
+//
+// The zero value is ready to use; it logs to slog.Default() until
+// SetLogger is called.
 type Upstream struct {
-	logger  *slog.Logger
+	logger  atomic.Pointer[slog.Logger]
 	swapMu  sync.Mutex
 	session atomic.Pointer[mcp.ClientSession]
 }
 
-// NewUpstream returns an Upstream with no active session. Call Swap to
-// open one.
-func NewUpstream(logger *slog.Logger) *Upstream {
-	if logger == nil {
-		logger = slog.Default()
+// SetLogger sets the logger used for lifecycle events. It may be called
+// at any time.
+func (u *Upstream) SetLogger(logger *slog.Logger) {
+	u.logger.Store(logger)
+}
+
+// log returns the configured logger, or slog.Default() if none is set.
+func (u *Upstream) log() *slog.Logger {
+	if l := u.logger.Load(); l != nil {
+		return l
 	}
-	return &Upstream{logger: logger}
+	return slog.Default()
 }
 
 // Session returns the active session, or an error if none is open.
@@ -63,7 +71,7 @@ func (u *Upstream) Swap(ctx context.Context, transport mcp.Transport) error {
 	}
 	prev := u.session.Swap(session)
 	u.closeInBackground(prev)
-	u.logger.Info("upstream session opened", "id", session.ID())
+	u.log().Info("upstream session opened", "id", session.ID())
 	return nil
 }
 
@@ -73,7 +81,7 @@ func (u *Upstream) Close() {
 	defer u.swapMu.Unlock()
 	if s := u.session.Swap(nil); s != nil {
 		_ = s.Close()
-		u.logger.Info("upstream session closed", "id", s.ID())
+		u.log().Info("upstream session closed", "id", s.ID())
 	}
 }
 
@@ -88,13 +96,13 @@ func (u *Upstream) closeInBackground(s *mcp.ClientSession) {
 		select {
 		case err := <-done:
 			if err != nil {
-				u.logger.Warn("closing previous upstream session", "id", id, "err", err)
+				u.log().Warn("closing previous upstream session", "id", id, "err", err)
 				return
 			}
-			u.logger.Info("upstream session closed", "id", id)
+			u.log().Info("upstream session closed", "id", id)
 		case <-time.After(10 * time.Second):
 			// The close is not aborted; we just stop waiting on it.
-			u.logger.Warn("previous upstream session close did not return within 10s", "id", id)
+			u.log().Warn("previous upstream session close did not return within 10s", "id", id)
 		}
 	}()
 }

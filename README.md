@@ -10,7 +10,7 @@ in-flight requests.
 ## Usage
 
 ```go
-up := mcpswap.NewUpstream(slog.Default())
+var up mcpswap.Upstream
 
 // Swap accepts any mcp.Transport. Use the transport's HTTPClient for
 // auth headers, retries, etc.

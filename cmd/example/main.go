@@ -45,11 +45,11 @@ func run(configPath string, swapInterval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	up := mcpswap.NewUpstream(slog.Default())
-	if err := swap(ctx, up, cfg); err != nil {
+	var up mcpswap.Upstream
+	if err := swap(ctx, &up, cfg); err != nil {
 		slog.Warn("initial upstream connect failed; serving offline until it recovers", "err", err)
 	}
-	go swapLoop(ctx, up, cfg, swapInterval)
+	go swapLoop(ctx, &up, cfg, swapInterval)
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "mcpswap", Version: "0.1.0"}, &mcp.ServerOptions{
 		HasTools:     true,

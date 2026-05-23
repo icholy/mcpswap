@@ -30,7 +30,7 @@ func startUpstream(t *testing.T) string {
 // httptest server, returning the proxy's URL.
 func startProxy(t *testing.T, upstreamURL string) string {
 	t.Helper()
-	up := NewUpstream(nil)
+	var up Upstream
 	t.Cleanup(up.Close)
 	if err := up.Swap(t.Context(), &mcp.StreamableClientTransport{Endpoint: upstreamURL}); err != nil {
 		t.Fatalf("swap: %v", err)
@@ -100,7 +100,7 @@ func TestUpstream_Dispatch(t *testing.T) {
 }
 
 func TestUpstream_SessionWhenUnconnected(t *testing.T) {
-	up := NewUpstream(nil)
+	var up Upstream
 	if _, err := up.Session(); err == nil {
 		t.Fatal("expected error from Session before Swap")
 	}
