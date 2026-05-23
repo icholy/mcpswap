@@ -55,8 +55,8 @@ func (u *Upstream) Swap(ctx context.Context, transport mcp.Transport) error {
 		return fmt.Errorf("connect: %w", err)
 	}
 	prev := u.session.Swap(session)
-	closeInBackground(prev)
-	u.logger.Info("upstream session opened")
+	u.closeInBackground(prev)
+	u.logger.Info("upstream session opened", "id", session.ID())
 	return nil
 }
 
@@ -66,14 +66,22 @@ func (u *Upstream) Close() {
 	defer u.swapMu.Unlock()
 	if s := u.session.Swap(nil); s != nil {
 		_ = s.Close()
+		u.logger.Info("upstream session closed", "id", s.ID())
 	}
 }
 
-func closeInBackground(s *mcp.ClientSession) {
+func (u *Upstream) closeInBackground(s *mcp.ClientSession) {
 	if s == nil {
 		return
 	}
-	go func() { _ = s.Close() }()
+	go func() {
+		id := s.ID()
+		if err := s.Close(); err != nil {
+			u.logger.Warn("closing previous upstream session", "id", id, "err", err)
+			return
+		}
+		u.logger.Info("upstream session closed", "id", id)
+	}()
 }
 
 // Dispatch is an MCP receiving middleware that forwards list/call/get/read
