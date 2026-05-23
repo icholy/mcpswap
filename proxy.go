@@ -31,7 +31,7 @@ func NewProxy(u *Upstream, transport string) (*Proxy, error) {
 		HasResources: true,
 	})
 	p := &Proxy{upstream: u, server: srv}
-	srv.AddReceivingMiddleware(p.dispatchMiddleware)
+	srv.AddReceivingMiddleware(p.dispatch)
 	switch transport {
 	case "", "streamable":
 		p.handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return p.server }, nil)
@@ -48,11 +48,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.handler.ServeHTTP(w, r)
 }
 
-// dispatchMiddleware forwards list/call/get/read methods to the active
+// dispatch forwards list/call/get/read methods to the active
 // upstream session. The initialize result is rewritten to advertise the
 // upstream's real capabilities. Everything else (e.g. ping) falls
 // through to the SDK's default handler.
-func (p *Proxy) dispatchMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
+func (p *Proxy) dispatch(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		// initialize is served by the SDK; mirror the upstream's
 		// capabilities so we don't advertise features it lacks. The
