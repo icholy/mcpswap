@@ -14,11 +14,15 @@ static binary that connects once and serves.
 
 ```go
 up := mcproxy.NewUpstream(slog.Default())
-if err := up.Swap(ctx, mcproxy.TransportConfig{
+transport, err := mcproxy.BuildTransport(mcproxy.TransportConfig{
     Transport: "streamable",
     URL:       "https://api.example.com/mcp/",
     Headers:   http.Header{"Authorization": {"Bearer " + token}},
-}); err != nil {
+})
+if err != nil {
+    return err
+}
+if err := up.Swap(ctx, transport); err != nil {
     return err
 }
 
@@ -41,8 +45,8 @@ your own `mcp.Server`.
 active one, closing the previous session in the background. On failure
 the active session is left untouched, so callers may retry or keep
 serving on the old session. To rotate credentials, build a fresh
-`TransportConfig` and call `Swap` again — the mechanism is identical
-across transports. `mcproxy` ships no rotation policy: when and how you
+transport and call `Swap` again — the mechanism is identical across
+transports. `mcproxy` ships no rotation policy: when and how you
 re-`Swap` is up to you.
 
 ## Command

@@ -49,9 +49,14 @@ func run(configPath string) error {
 		return err
 	}
 
+	transport, err := mcproxy.BuildTransport(upstreamConfig(cfg))
+	if err != nil {
+		return fmt.Errorf("build transport: %w", err)
+	}
+
 	up := mcproxy.NewUpstream(slog.Default())
 	connectCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := up.Swap(connectCtx, upstreamConfig(cfg)); err != nil {
+	if err := up.Swap(connectCtx, transport); err != nil {
 		slog.Warn("initial upstream connect failed; serving offline until it recovers", "err", err)
 	}
 	cancel()

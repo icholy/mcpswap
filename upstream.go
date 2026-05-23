@@ -39,17 +39,16 @@ func (u *Upstream) Session() (*mcp.ClientSession, error) {
 	return s, nil
 }
 
-// Swap connects a new session using cfg and atomically makes it the
-// active session, closing the previous one in the background. On
+// Swap connects a new session over transport and atomically makes it
+// the active session, closing the previous one in the background. On
 // failure the active session is left untouched and the error is
 // returned, so callers may retry or keep serving on the old session.
-func (u *Upstream) Swap(ctx context.Context, cfg TransportConfig) error {
+//
+// transport is consumed by a single connect attempt; pass a fresh
+// transport on each call.
+func (u *Upstream) Swap(ctx context.Context, transport mcp.Transport) error {
 	u.swapMu.Lock()
 	defer u.swapMu.Unlock()
-	transport, err := BuildTransport(cfg)
-	if err != nil {
-		return fmt.Errorf("build transport: %w", err)
-	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "mcproxy", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
