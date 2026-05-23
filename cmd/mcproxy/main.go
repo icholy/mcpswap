@@ -35,31 +35,29 @@ type fileConfig struct {
 
 func main() {
 	configPath := flag.String("config", "mcproxy.json", "path to the proxy config file")
+	swapInterval := flag.Duration("swap-interval", 30*time.Second, "interval between upstream session swaps")
 	flag.Parse()
 
-	if err := run(*configPath); err != nil {
+	if err := run(*configPath, *swapInterval); err != nil {
 		slog.Error("mcproxy exited with error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath string) error {
+func run(configPath string, swapInterval time.Duration) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	transport, err := mcproxy.BuildTransport(upstreamConfig(cfg))
-	if err != nil {
-		return fmt.Errorf("build transport: %w", err)
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	up := mcproxy.NewUpstream(slog.Default())
-	connectCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := up.Swap(connectCtx, transport); err != nil {
+	if err := swap(ctx, up, cfg); err != nil {
 		slog.Warn("initial upstream connect failed; serving offline until it recovers", "err", err)
 	}
-	cancel()
+	go swapLoop(ctx, up, cfg, swapInterval)
 
 	mcpSrv := mcp.NewServer(&mcp.Implementation{
 		Name:    "mcproxy",
@@ -91,9 +89,6 @@ func run(configPath string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	errs := make(chan error, 1)
 	go func() {
 		slog.Info("mcproxy listening", "addr", cfg.Proxy.Addr, "path", cfg.Proxy.Path)
@@ -117,6 +112,34 @@ func run(configPath string) error {
 	_ = srv.Shutdown(shutdownCtx)
 	up.Close()
 	return <-errs
+}
+
+// swap builds a fresh transport from cfg and swaps the upstream session.
+// A new transport is built each call since Swap consumes it.
+func swap(ctx context.Context, up *mcproxy.Upstream, cfg *fileConfig) error {
+	transport, err := mcproxy.BuildTransport(upstreamConfig(cfg))
+	if err != nil {
+		return fmt.Errorf("build transport: %w", err)
+	}
+	swapCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return up.Swap(swapCtx, transport)
+}
+
+// swapLoop re-swaps the upstream session every interval until ctx is done.
+func swapLoop(ctx context.Context, up *mcproxy.Upstream, cfg *fileConfig, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := swap(ctx, up, cfg); err != nil {
+				slog.Warn("upstream swap failed", "err", err)
+			}
+		}
+	}
 }
 
 func loadConfig(path string) (*fileConfig, error) {
